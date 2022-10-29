@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"github.com/vsivarajah/crypto-exchange/orderbook"
@@ -110,19 +111,34 @@ func (ex *Exchange) handleGetBook(c echo.Context) error {
 
 }
 
-type CancelOrderRequest struct {
-	Bid bool
-	ID  int64
-}
-
 func (ex *Exchange) cancelOrder(c echo.Context) error {
-	var cancelOrderRequest CancelOrderRequest
-
-	if err := json.NewDecoder(c.Request().Body).Decode(&cancelOrderRequest); err != nil {
-		return err
+	idString := c.Param("id")
+	id, _ := strconv.Atoi(idString)
+	ob := ex.orderbooks[MarketETH]
+	orderCanceled := false
+	for _, limit := range ob.Asks() {
+		for _, order := range limit.Orders {
+			if order.ID == int64(id) {
+				ob.CancelOrder(order)
+				orderCanceled = true
+			}
+			if orderCanceled {
+				return c.JSON(http.StatusOK, map[string]any{"msg": "order cancelled"})
+			}
+		}
 	}
-	id := c.Param("id")
-	id
+
+	for _, limit := range ob.Bids() {
+		for _, order := range limit.Orders {
+			if order.ID == int64(id) {
+				ob.CancelOrder(order)
+				orderCanceled = true
+			}
+			if orderCanceled {
+				return c.JSON(http.StatusOK, map[string]any{"msg": "order cancelled"})
+			}
+		}
+	}
 	return nil
 }
 
