@@ -15,6 +15,7 @@ func main() {
 
 	e.GET("/book/:market", ex.handleGetBook)
 	e.POST("/order", ex.handlePlaceOrder)
+	e.DELETE("/order/:id", ex.cancelOrder)
 	e.Start(":3000")
 
 }
@@ -53,6 +54,7 @@ type PlaceOrderRequest struct {
 }
 
 type Order struct {
+	ID        int64
 	Price     float64
 	Size      float64
 	Bid       bool
@@ -60,8 +62,10 @@ type Order struct {
 }
 
 type OrderbookData struct {
-	Asks []*Order
-	Bids []*Order
+	TotalBidVolume float64
+	TotalAskVolume float64
+	Asks           []*Order
+	Bids           []*Order
 }
 
 func (ex *Exchange) handleGetBook(c echo.Context) error {
@@ -72,12 +76,15 @@ func (ex *Exchange) handleGetBook(c echo.Context) error {
 	}
 
 	orderbookData := OrderbookData{
-		Asks: []*Order{},
-		Bids: []*Order{},
+		TotalBidVolume: ob.BidTotalVolume(),
+		TotalAskVolume: ob.AskTotalVolume(),
+		Asks:           []*Order{},
+		Bids:           []*Order{},
 	}
 	for _, limit := range ob.Asks() {
 		for _, order := range limit.Orders {
 			o := Order{
+				ID:        order.ID,
 				Price:     limit.Price,
 				Size:      order.Size,
 				Bid:       order.Bid,
@@ -90,6 +97,7 @@ func (ex *Exchange) handleGetBook(c echo.Context) error {
 	for _, limit := range ob.Bids() {
 		for _, order := range limit.Orders {
 			o := Order{
+				ID:        order.ID,
 				Price:     limit.Price,
 				Size:      order.Size,
 				Bid:       order.Bid,
@@ -101,6 +109,23 @@ func (ex *Exchange) handleGetBook(c echo.Context) error {
 	return c.JSON(http.StatusOK, orderbookData)
 
 }
+
+type CancelOrderRequest struct {
+	Bid bool
+	ID  int64
+}
+
+func (ex *Exchange) cancelOrder(c echo.Context) error {
+	var cancelOrderRequest CancelOrderRequest
+
+	if err := json.NewDecoder(c.Request().Body).Decode(&cancelOrderRequest); err != nil {
+		return err
+	}
+	id := c.Param("id")
+	id
+	return nil
+}
+
 func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 	var placeOrderData PlaceOrderRequest
 
@@ -112,6 +137,15 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 	ob := ex.orderbooks[market]
 	order := orderbook.NewOrder(placeOrderData.Bid, placeOrderData.Size)
 
-	ob.PlaceLimitOrder(placeOrderData.Price, order)
-	return c.JSON(200, map[string]any{"msg": "order placed"})
+	if placeOrderData.Type == LimitOrder {
+		ob.PlaceLimitOrder(placeOrderData.Price, order)
+		return c.JSON(200, map[string]any{"msg": "limit order placed"})
+	}
+
+	if placeOrderData.Type == MarketOrder {
+		matches := ob.PlaceMarketOrder(order)
+
+		return c.JSON(200, map[string]any{"matches": len(matches)})
+	}
+	return nil
 }
