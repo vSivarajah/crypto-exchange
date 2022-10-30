@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 func main() {
 
 	e := echo.New()
+	e.HTTPErrorHandler = httpErrorHandler
 	ex := NewExchange()
 
 	e.GET("/book/:market", ex.handleGetBook)
@@ -19,6 +21,10 @@ func main() {
 	e.DELETE("/order/:id", ex.cancelOrder)
 	e.Start(":3000")
 
+}
+
+func httpErrorHandler(err error, c echo.Context) {
+	fmt.Println(err)
 }
 
 type OrderType string
@@ -115,31 +121,15 @@ func (ex *Exchange) cancelOrder(c echo.Context) error {
 	idString := c.Param("id")
 	id, _ := strconv.Atoi(idString)
 	ob := ex.orderbooks[MarketETH]
-	orderCanceled := false
-	for _, limit := range ob.Asks() {
-		for _, order := range limit.Orders {
-			if order.ID == int64(id) {
-				ob.CancelOrder(order)
-				orderCanceled = true
-			}
-			if orderCanceled {
-				return c.JSON(http.StatusOK, map[string]any{"msg": "order cancelled"})
-			}
-		}
-	}
+	order := ob.Orders[int64(id)]
+	ob.CancelOrder(order)
+	return c.JSON(http.StatusOK, map[string]any{"msg": "order deleted"})
+}
 
-	for _, limit := range ob.Bids() {
-		for _, order := range limit.Orders {
-			if order.ID == int64(id) {
-				ob.CancelOrder(order)
-				orderCanceled = true
-			}
-			if orderCanceled {
-				return c.JSON(http.StatusOK, map[string]any{"msg": "order cancelled"})
-			}
-		}
-	}
-	return nil
+type MatchedOrder struct {
+	Price float64
+	Size  float64
+	ID    int64
 }
 
 func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
@@ -160,8 +150,24 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 
 	if placeOrderData.Type == MarketOrder {
 		matches := ob.PlaceMarketOrder(order)
+		matchedOrders := make([]*MatchedOrder, len(matches))
 
-		return c.JSON(200, map[string]any{"matches": len(matches)})
+		isBid := false
+		if order.Bid {
+			isBid = true
+		}
+		for i := 0; i < len(matchedOrders); i++ {
+			id := matches[i].Bid.ID
+			if isBid {
+				id = matches[i].Ask.ID
+			}
+			matchedOrders[i] = &MatchedOrder{
+				ID:    id,
+				Size:  matches[i].SizeFilled,
+				Price: matches[i].Price,
+			}
+		}
+		return c.JSON(200, map[string]any{"matches": matchedOrders})
 	}
 	return nil
 }
